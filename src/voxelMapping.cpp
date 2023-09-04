@@ -9,7 +9,7 @@
 #include <so3_math.h>
 #include <ros/ros.h>
 #include <Eigen/Core>
-#include "IMU_Processing.h"
+#include "IMU_Processing.hpp"
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
 #include <pcl_conversions/pcl_conversions.h>
@@ -22,6 +22,7 @@
 #include <livox_ros_driver/CustomMsg.h>
 #include "preprocess.h"
 #include "voxel_map_util.hpp"
+#include "pv_lio/save_map.h"
 
 using namespace std;
 using namespace Eigen;
@@ -61,7 +62,7 @@ bool   scan_pub_en = false, dense_pub_en = false, scan_body_pub_en = false;
 bool pcd_save_en = false;
 int pcd_save_interval = -1;
 
-PointCloudXYZI::Ptr pcl_wait_save;
+PointCloudXYZI::Ptr pcl_wait_save(new PointCloudXYZI());
 std::string pcd_file_prefix;
 
 vector<double>       extrinT(3, 0.0);
@@ -121,6 +122,40 @@ shared_ptr<ImuProcess> p_imu(new ImuProcess());
 // const bool var_contrast(pointWithCov &x, pointWithCov &y) {
 //     return (x.cov.diagonal().norm() < y.cov.diagonal().norm());
 // };
+
+bool saveMapService(pv_lio::save_map::Request& req, pv_lio::save_map::Response& res)
+{
+    //   string saveMapDirectory;
+    
+      cout << "****************************************************" << endl;
+      cout << "Saving map to pcd files ..." << endl;
+    //   if(req.destination.empty()) saveMapDirectory = std::getenv("HOME") + savePCDDirectory;
+    //   else saveMapDirectory = std::getenv("HOME") + req.destination;
+    //   cout << "Save destination: " << saveMapDirectory << endl;
+    std::string p = req.destination;
+    float leaf_size = req.resolution;
+    pcl::VoxelGrid<PointType> vg;
+    vg.setLeafSize(leaf_size, leaf_size, leaf_size);
+    vg.setInputCloud(pcl_wait_save);
+    vg.filter(*pcl_wait_save);
+    int ret = pcl::io::savePCDFileBinary(p + "/scans.pcd", *pcl_wait_save);
+    res.success = ret == 0;
+
+    if (res.success) {
+        std::cout << "done" << std::endl;
+    } else {
+        std::cout << "failed" << std::endl;
+    }
+
+    // if (pcl_wait_save->size() > 0 && pcd_save_en)
+    // {
+    //     string file_name = string("scans.pcd");
+    //     string all_points_dir(string(string("/point-lio/src/Point-LIO/") + "PCD/") + file_name);
+    //     pcl::PCDWriter pcd_writer;
+    //     pcd_writer.writeBinary("/point-lio/src/Point-LIO/PCD/scans.pcd", *pcl_wait_save);
+    // }
+    return res.success;
+}
 
 const bool var_contrast_const(pointWithCov &x, pointWithCov &y) {
     return (x.cov_diagonal_norm < y.cov_diagonal_norm );
@@ -809,6 +844,8 @@ int main(int argc, char** argv)
             ("/path", 100000);
     ros::Publisher voxel_map_pub =
             nh.advertise<visualization_msgs::MarkerArray>("/planes", 10000);
+    ros::ServiceServer srvSaveMap  = nh.advertiseService("/save_map" ,  &saveMapService);
+
 //------------------------------------------------------------------------------------------------------
     // for Plane Map
     bool init_map = false;
@@ -817,7 +854,7 @@ int main(int argc, char** argv)
     int scan_index = 0;
 
     // signal(SIGINT, SigHandle);
-    pcl_wait_save = PointCloudXYZI::Ptr(new PointCloudXYZI);
+    // pcl_wait_save = PointCloudXYZI::Ptr(new PointCloudXYZI);
     pcd_file_prefix = root_dir + "PCD/scans-" + std::to_string(uint64_t(ros::Time::now().toSec()));
     pcd_index = 0;
 

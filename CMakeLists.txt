@@ -5,7 +5,7 @@ project(pv_lio)
 #set(CMAKE_CXX_FLAGS "-std=c++11")
 set(CMAKE_BUILD_TYPE "Release")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -g")
-# set(PCL_DIR /usr/local/share/pcl-1.11)
+
 add_definitions(-DROOT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/\")
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fexceptions" )
@@ -67,10 +67,9 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 find_package(Eigen3 REQUIRED)
-# find_package(PCL 1.10 REQUIRED)
+find_package(PCL 1.8 REQUIRED)
 #find_package(GTSAM REQUIRED QUIET)
-set(OpenBLAS_INCLUDE_DIRS "/usr/include/x86_64-linux-gnu/openblas-pthread")
-set(OpenBLAS_LIBRARIES "/usr/lib/x86_64-linux-gnu/libopenblas.a")
+
 message(Eigen: ${EIGEN3_INCLUDE_DIR})
 
 include_directories(
@@ -85,15 +84,19 @@ include_directories(
 #  FILES
 #  Pose6D.msg
 #)
-
-# generate_messages(
-#  DEPENDENCIES
-#  geometry_msgs
-# )
+add_service_files(
+  DIRECTORY srv
+  FILES
+  save_map.srv
+)
+generate_messages(
+ DEPENDENCIES
+ geometry_msgs
+)
 
 catkin_package(
   CATKIN_DEPENDS geometry_msgs nav_msgs roscpp rospy std_msgs message_runtime
-  DEPENDS EIGEN3
+  DEPENDS EIGEN3 PCL
   INCLUDE_DIRS
 )
 

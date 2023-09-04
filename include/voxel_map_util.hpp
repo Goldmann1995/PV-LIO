@@ -48,7 +48,7 @@ struct Plane {
   Eigen::Vector3d y_normal;
   Eigen::Vector3d x_normal;
   Eigen::Matrix3d covariance;
-  Eigen::Matrix<double, 6, 6> plane_cov;
+  Eigen::Matrix<double, 6, 6,Eigen::DontAlign> plane_cov;
   float radius = 0;
   float min_eigen_value = 1;
   float mid_eigen_value = 1;
@@ -745,7 +745,7 @@ void BuildResidualListOMP(const std::unordered_map<VOXEL_LOC, std::shared_ptr<Oc
                           std::vector<ptpl> &ptpl_list,
                           std::vector<Eigen::Vector3d> &non_match) {
   ptpl_list.clear();
-  std::vector<std::pair<bool, ptpl>> all_ptpl_list(pv_list.size());
+  std::vector<std::pair<bool, ptpl> , Eigen::aligned_allocator<std::pair<bool, ptpl>>> all_ptpl_list(pv_list.size());
   auto pv_list_size = pv_list.size();
 #ifdef MP_EN
   #pragma omp parallel for
