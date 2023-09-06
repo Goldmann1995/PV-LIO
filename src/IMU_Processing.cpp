@@ -63,22 +63,22 @@ static const M3F Eye3f(M3F::Identity());
 static const V3D Zero3d(0, 0, 0);
 static const V3F Zero3f(0, 0, 0);
 
-template<typename T>
-static auto set_pose6d(const double t, const Eigen::Matrix<T, 3, 1> &a, const Eigen::Matrix<T, 3, 1> &g, \
-                const Eigen::Matrix<T, 3, 1> &v, const Eigen::Matrix<T, 3, 1> &p, const Eigen::Matrix<T, 3, 3> &R)
-{
-    Pose6D rot_kp;
-    rot_kp.offset_time = t;
-    for (int i = 0; i < 3; i++)
-    {
-        rot_kp.acc[i] = a(i);
-        rot_kp.gyr[i] = g(i);
-        rot_kp.vel[i] = v(i);
-        rot_kp.pos[i] = p(i);
-        for (int j = 0; j < 3; j++)  rot_kp.rot[i*3+j] = R(i,j);
-    }
-    return rot_kp;
-}
+// template<typename T>
+// static auto set_pose6d(const double t, const Eigen::Matrix<T, 3, 1> &a, const Eigen::Matrix<T, 3, 1> &g, \
+//                 const Eigen::Matrix<T, 3, 1> &v, const Eigen::Matrix<T, 3, 1> &p, const Eigen::Matrix<T, 3, 3> &R)
+// {
+//     Pose6D rot_kp;
+//     rot_kp.offset_time = t;
+//     for (int i = 0; i < 3; i++)
+//     {
+//         rot_kp.acc[i] = a(i);
+//         rot_kp.gyr[i] = g(i);
+//         rot_kp.vel[i] = v(i);
+//         rot_kp.pos[i] = p(i);
+//         for (int j = 0; j < 3; j++)  rot_kp.rot[i*3+j] = R(i,j);
+//     }
+//     return rot_kp;
+// }
 
 ImuProcess::ImuProcess()
     : b_first_frame_(true), imu_need_init_(true), start_timestamp_(-1)
@@ -189,10 +189,31 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 
         N++;
     }
     state_ikfom init_state = kf_state.get_x();
-    init_state.grav = S2(-mean_acc / mean_acc.norm() * G_m_s2);
+
+//       const auto& orientation = meas.imu.front()->orientation;
+//   if( orientation.x != 0 || orientation.y != 0 || orientation.z != 0 || orientation.w != 0 ){
+//     init_state.rot = Eigen::Quaterniond(orientation.w, orientation.x, orientation.y, orientation.z);
+//   }
+  // else
+  // {
+    // init_state.rot = Eigen::Quaterniond::FromTwoVectors(mean_acc, Eigen::Vector3d::UnitZ());
+  // }
+
+    // gravity_ << 0.0, 0.0, -9.810;
+    M3D rot_init;
+    init_state.grav =  -1 * mean_acc * G_m_s2 / acc_norm; 
+    Set_init(init_state.grav , rot_init);
+    init_state.grav = gravity_;
+    init_state.rot  = rot_init;
+    init_state.rot.normalize();
+    // mean_acc =  -rot_init.transpose() * gravity_;
+
+    // mean_acc = init_state.rot * mean_acc;
+    // mean_gyr = init_state.rot * mean_gyr;
+    // init_state.grav = S2(-mean_acc / mean_acc.norm() * G_m_s2);
 
     // state_inout.rot = Eye3d; // Exp(mean_acc.cross(V3D(0, 0, -1 / scale_gravity)));
-    init_state.bg = mean_gyr;
+    // init_state.bg = mean_gyr;
     init_state.offset_T_L_I = Lidar_T_wrt_IMU;
     init_state.offset_R_L_I = Lidar_R_wrt_IMU;
     kf_state.change_x(init_state);
@@ -212,6 +233,35 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 
     last_imu_ = meas.imu.back();
 }
 
+void ImuProcess::Set_init(Eigen::Vector3d &tmp_gravity, Eigen::Matrix3d &rot)
+{
+  /** 1. initializing the gravity, gyro bias, acc and gyro covariance
+   ** 2. normalize the acceleration measurenments to unit gravity **/
+  // V3D tmp_gravity = - mean_acc / mean_acc.norm() * G_m_s2; // state_gravity;
+  M3D hat_grav;
+  hat_grav << 0.0, gravity_(2), -gravity_(1),
+              -gravity_(2), 0.0, gravity_(0),
+              gravity_(1), -gravity_(0), 0.0;
+  double align_norm = (hat_grav * tmp_gravity).norm() / tmp_gravity.norm() / gravity_.norm();
+  double align_cos = gravity_.transpose() * tmp_gravity;
+  align_cos = align_cos / gravity_.norm() / tmp_gravity.norm();
+  if (align_norm < 1e-6)
+  {
+    if (align_cos > 1e-6)
+    {
+      rot = Eye3d;
+    }
+    else
+    {
+      rot = -Eye3d;
+    }
+  }
+  else
+  {
+    V3D align_angle = hat_grav * tmp_gravity / (hat_grav * tmp_gravity).norm() * acos(align_cos); 
+    rot = Exp(align_angle(0), align_angle(1), align_angle(2));
+  }
+}
 // static bool time_list(PointType &x, PointType &y) {return (x.curvature < y.curvature);};
 
 void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state, PointCloudXYZI &pcl_out)
@@ -260,7 +310,7 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
 
         // fout_imu << setw(10) << head->header.stamp.toSec() - first_lidar_time << " " << angvel_avr.transpose() << " " << acc_avr.transpose() << endl;
 
-        acc_avr = acc_avr * G_m_s2 / mean_acc.norm(); // - state_inout.ba;
+        acc_avr = acc_avr * G_m_s2 / acc_norm; // - state_inout.ba;
 
         if (head->header.stamp.toSec() < last_lidar_end_time_)
         {
@@ -341,14 +391,14 @@ void ImuProcess::UndistortPcl(const MeasureGroup &meas, esekfom::esekf<state_ikf
     }
 }
 
-PointCloudXYZI::Ptr ImuProcess::Process(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state)
+void ImuProcess::Process(const MeasureGroup &meas, esekfom::esekf<state_ikfom, 12, input_ikfom> &kf_state, PointCloudXYZI::Ptr pcl_un_)
 {
     double t1, t2, t3;
     t1 = omp_get_wtime();
 
     if (meas.imu.empty())
     {
-        return {};
+        return;
     };
     ROS_ASSERT(meas.lidar != nullptr);
 
@@ -375,17 +425,16 @@ PointCloudXYZI::Ptr ImuProcess::Process(const MeasureGroup &meas, esekfom::esekf
             // fout_imu.open(DEBUG_FILE_DIR("imu.txt"), std::ios::out);
         }
 
-        return {};
+        return ;
     }
 
-    PointCloudXYZI::Ptr cur_pcl_un_ = PointCloudXYZI::Ptr(new PointCloudXYZI);
-    UndistortPcl(meas, kf_state, *cur_pcl_un_);
+    // PointCloudXYZI::Ptr cur_pcl_un_ = PointCloudXYZI::Ptr(new PointCloudXYZI);
+    UndistortPcl(meas, kf_state, *pcl_un_);
 
     t2 = omp_get_wtime();
     t3 = omp_get_wtime();
 
     // cout<<"[ IMU Process ]: Time: "<<t3 - t1<<endl;
-    return cur_pcl_un_;
 }
 
 MTK::get_cov<process_noise_ikfom>::type process_noise_cov()
@@ -412,9 +461,9 @@ Eigen::Matrix<double, 24, 1> get_f(state_ikfom &s, const input_ikfom &in)
 	return res;
 }
 
-Eigen::Matrix<double, 24, 23> df_dx(state_ikfom &s, const input_ikfom &in)
+Eigen::Matrix<double, 24, 24> df_dx(state_ikfom &s, const input_ikfom &in)
 {
-	Eigen::Matrix<double, 24, 23> cov = Eigen::Matrix<double, 24, 23>::Zero();
+	Eigen::Matrix<double, 24, 24> cov = Eigen::Matrix<double, 24, 24>::Zero();
 	cov.template block<3, 3>(0, 12) = Eigen::Matrix3d::Identity();
 	vect3 acc_;
 	in.acc.boxminus(acc_, s.ba);
@@ -422,10 +471,11 @@ Eigen::Matrix<double, 24, 23> df_dx(state_ikfom &s, const input_ikfom &in)
 	in.gyro.boxminus(omega, s.bg);
 	cov.template block<3, 3>(12, 3) = -s.rot.toRotationMatrix()*MTK::hat(acc_);
 	cov.template block<3, 3>(12, 18) = -s.rot.toRotationMatrix();
-	Eigen::Matrix<state_ikfom::scalar, 2, 1> vec = Eigen::Matrix<state_ikfom::scalar, 2, 1>::Zero();
-	Eigen::Matrix<state_ikfom::scalar, 3, 2> grav_matrix;
-	s.S2_Mx(grav_matrix, vec, 21);
-	cov.template block<3, 2>(12, 21) =  grav_matrix; 
+	// Eigen::Matrix<state_ikfom::scalar, 2, 1> vec = Eigen::Matrix<state_ikfom::scalar, 2, 1>::Zero();
+	// Eigen::Matrix<state_ikfom::scalar, 3, 2> grav_matrix;
+	// s.S2_Mx(grav_matrix, vec, 21);
+	// cov.template block<3, 2>(12, 21) =  grav_matrix; 
+    cov.template block<3, 3>(12, 21) = Eigen::Matrix3d::Identity(); // grav_matrix; 
 	cov.template block<3, 3>(3, 15) = -Eigen::Matrix3d::Identity(); 
 	return cov;
 }
