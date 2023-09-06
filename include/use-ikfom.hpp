@@ -17,7 +17,7 @@ MTK_BUILD_MANIFOLD(state_ikfom,
 ((vect3, vel))
 ((vect3, bg))
 ((vect3, ba))
-((S2, grav))
+((vect3, grav))
 );
 
 MTK_BUILD_MANIFOLD(input_ikfom,
@@ -38,7 +38,7 @@ MTK::get_cov<process_noise_ikfom>::type process_noise_cov();
 //vect3 Lidar_offset_to_IMU(L_offset_to_I, 3);
 Eigen::Matrix<double, 24, 1> get_f(state_ikfom &s, const input_ikfom &in);
 
-Eigen::Matrix<double, 24, 23> df_dx(state_ikfom &s, const input_ikfom &in);
+Eigen::Matrix<double, 24, 24> df_dx(state_ikfom &s, const input_ikfom &in);
 
 
 Eigen::Matrix<double, 24, 12> df_dw(state_ikfom &s, const input_ikfom &in);
