@@ -77,5 +77,20 @@ struct Pose6D
 // {
 //   return degrees * PI_M / 180.0;
 // }
-
+template<typename T>
+auto set_pose6d(const double t, const Eigen::Matrix<T, 3, 1> &a, const  Eigen::Matrix<T, 3, 1> &g, \
+                const  Eigen::Matrix<T, 3, 1> &v, const  Eigen::Matrix<T, 3, 1> &p, const  Eigen::Matrix<T, 3, 3> &R)
+{
+    Pose6D rot_kp;
+    rot_kp.offset_time = t;
+    for (int i = 0; i < 3; i++)
+    {
+        rot_kp.acc[i] = a(i);
+        rot_kp.gyr[i] = g(i);
+        rot_kp.vel[i] = v(i);
+        rot_kp.pos[i] = p(i);
+        for (int j = 0; j < 3; j++)  rot_kp.rot[i*3+j] = R(i,j);
+    }
+    return rot_kp;
+}
 #endif
