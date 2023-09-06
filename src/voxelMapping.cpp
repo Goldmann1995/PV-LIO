@@ -9,7 +9,7 @@
 #include <so3_math.h>
 #include <ros/ros.h>
 #include <Eigen/Core>
-#include "IMU_Processing.hpp"
+#include "IMU_Processing.h"
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
 #include <pcl_conversions/pcl_conversions.h>
@@ -23,7 +23,7 @@
 #include "preprocess.h"
 #include "voxel_map_util.hpp"
 #include "pv_lio/save_map.h"
-
+// #include "imuProcessing.h"
 using namespace std;
 using namespace Eigen;
 
@@ -41,7 +41,7 @@ double lidar_time_offset = 0.0;
 
 float DET_RANGE = 300.0f;
 const float MOV_THRESHOLD = 1.5f;
-double R_inv;
+double R_inv , acc_norm;
 std::mutex mtx_buffer;
 // condition_variable sig_buffer;
 
@@ -67,6 +67,8 @@ std::string pcd_file_prefix;
 
 vector<double>       extrinT(3, 0.0);
 vector<double>       extrinR(9, 0.0);
+vector<double>       gravity = {0, 0, -9.81};
+
 deque<double>                     time_buffer;
 deque<PointCloudXYZI::Ptr>        lidar_buffer;
 deque<sensor_msgs::Imu::ConstPtr> imu_buffer;
@@ -122,6 +124,7 @@ shared_ptr<ImuProcess> p_imu(new ImuProcess());
 // const bool var_contrast(pointWithCov &x, pointWithCov &y) {
 //     return (x.cov.diagonal().norm() < y.cov.diagonal().norm());
 // };
+PointCloudXYZI::Ptr pcl_wait_save_(new PointCloudXYZI());
 
 bool saveMapService(pv_lio::save_map::Request& req, pv_lio::save_map::Response& res)
 {
@@ -134,11 +137,12 @@ bool saveMapService(pv_lio::save_map::Request& req, pv_lio::save_map::Response& 
     //   cout << "Save destination: " << saveMapDirectory << endl;
     std::string p = req.destination;
     float leaf_size = req.resolution;
+
     pcl::VoxelGrid<PointType> vg;
     vg.setLeafSize(leaf_size, leaf_size, leaf_size);
     vg.setInputCloud(pcl_wait_save);
-    vg.filter(*pcl_wait_save);
-    int ret = pcl::io::savePCDFileBinary(p + "/scans.pcd", *pcl_wait_save);
+    vg.filter(*pcl_wait_save_);
+    int ret = pcl::io::savePCDFileBinary(p + "/scans.pcd", *pcl_wait_save_);
     res.success = ret == 0;
 
     if (res.success) {
@@ -495,11 +499,11 @@ void publish_odometry(const ros::Publisher & pubOdomAftMapped)
     transform.setRotation( q );
     br.sendTransform( tf::StampedTransform( transform, odomAftMapped.header.stamp, "camera_init", "body" ) );
 
-    static tf::TransformBroadcaster br_world;
-    transform.setOrigin(tf::Vector3(0, 0, 0));
-    q.setValue(p_imu->Initial_R_wrt_G.x(), p_imu->Initial_R_wrt_G.y(), p_imu->Initial_R_wrt_G.z(), p_imu->Initial_R_wrt_G.w());
-    transform.setRotation(q);
-    br_world.sendTransform(tf::StampedTransform(transform, odomAftMapped.header.stamp, "world", "camera_init"));
+    // static tf::TransformBroadcaster br_world;
+    // transform.setOrigin(tf::Vector3(0, 0, 0));
+    // q.setValue(p_imu->Initial_R_wrt_G.x(), p_imu->Initial_R_wrt_G.y(), p_imu->Initial_R_wrt_G.z(), p_imu->Initial_R_wrt_G.w());
+    // transform.setRotation(q);
+    // br_world.sendTransform(tf::StampedTransform(transform, odomAftMapped.header.stamp, "world", "camera_init"));
 }
 
 void publish_path(const ros::Publisher pubPath)
@@ -777,6 +781,8 @@ int main(int argc, char** argv)
     nh.param<bool>("mapping/extrinsic_est_en", extrinsic_est_en, true);
     nh.param<vector<double>>("mapping/extrinsic_T", extrinT, vector<double>());
     nh.param<vector<double>>("mapping/extrinsic_R", extrinR, vector<double>());
+    nh.param<double>("mapping/acc_norm", acc_norm, 1.0);
+    nh.param<vector<double>>("mapping/gravity", gravity, vector<double>());
 
     // noise model params
     nh.param<double>("noise_model/ranging_cov", ranging_cov, 0.02);
@@ -818,6 +824,8 @@ int main(int argc, char** argv)
     p_imu->set_acc_cov(V3D(acc_cov, acc_cov, acc_cov));
     p_imu->set_gyr_bias_cov(V3D(b_gyr_cov, b_gyr_cov, b_gyr_cov));
     p_imu->set_acc_bias_cov(V3D(b_acc_cov, b_acc_cov, b_acc_cov));
+    p_imu->gravity_ << VEC_FROM_ARRAY(gravity);
+    p_imu->acc_norm = acc_norm;
 
     double epsi[23] = {0.001};
     fill(epsi, epsi+23, 0.001);
@@ -874,7 +882,7 @@ int main(int argc, char** argv)
                     continue;
                 }
 
-                feats_undistort = p_imu->Process(Measures, kf);
+                p_imu->Process(Measures, kf , feats_undistort);
                 state_point = kf.get_x();
                 // pos_lid = state_point.pos + state_point.rot * state_point.offset_T_L_I;
 
